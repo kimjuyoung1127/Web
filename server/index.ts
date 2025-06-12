@@ -1,11 +1,12 @@
 import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { registerRoutes } from "./routes"; // This function should define routes on the 'app'
+import { log } from "./vite"; // Assuming log is still needed
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
+// Logging middleware (can remain if useful for API logs)
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
@@ -19,49 +20,36 @@ app.use((req, res, next) => {
 
   res.on("finish", () => {
     const duration = Date.now() - start;
+    // Only log for paths that are likely API calls, not static assets
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "…";
       }
-
       log(logLine);
     }
   });
-
   next();
 });
 
-(async () => {
-  const server = await registerRoutes(app);
+// Initialize API routes by calling registerRoutes.
+// IMPORTANT: registerRoutes from server/routes.ts needs to be modified
+// to actually add routes to the 'app' instance (e.g., app.get('/api/users', ...)).
+// Currently, it only creates an http.Server and returns it, without adding routes to app.
+// For Vercel, we export the 'app' instance.
+registerRoutes(app); // This call is kept, assuming it WILL be modified to define app routes.
+                     // The http.Server it returns is ignored.
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+// Error handling middleware
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  const status = err.status || err.statusCode || 500;
+  const message = err.message || "Internal Server Error";
+  console.error("Error caught by server/index.ts middleware:", err); // Add some server-side logging
+  res.status(status).json({ message });
+});
 
-    res.status(status).json({ message });
-    throw err;
-  });
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
-  server.listen(port, "127.0.0.1", () => {
-    log(`serving on port ${port}`);
-  });
-})();
-  
+// Export the app for Vercel
+export default app;
